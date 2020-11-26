@@ -88,40 +88,41 @@ def C_input_func(C):
 
     return C_img
 
-@tf.function
+#@tf.function
 def run_model(model, images, training=True):
     return model(images, training=training)
 
 def cal_loss(from_father_mod, from_mother_mod, from_baby_mod,
             father_discrim, mother_discrim, baby_discrim,
             A_batch_img, B_batch_img, C_batch_img):
-
+    # 현재의 문제를 짚으라 하면, 생성된 아기 얼굴이 다양하게 변하지 않는다. (즉, 레퍼런스 이미지와 똑같아진다)
     with tf.GradientTape(persistent=True) as g_tape, tf.GradientTape() as d_tape:
         fake_baby_father = run_model(from_father_mod, A_batch_img, True)
         fake_baby_mother = run_model(from_mother_mod, B_batch_img, True)
         
-        #similarity_father = (fake_baby_father * tf.expand_dims(C_batch_img[0], 0)) / (tf.math.sqrt(fake_baby_father*fake_baby_father) * tf.math.sqrt(tf.expand_dims(C_batch_img[0], 0)*tf.expand_dims(C_batch_img[0], 0)))
-        #similarity_mother = (fake_baby_mother * tf.expand_dims(C_batch_img[1], 0)) / (tf.math.sqrt(fake_baby_mother*fake_baby_mother) * tf.math.sqrt(tf.expand_dims(C_batch_img[0], 0)*tf.expand_dims(C_batch_img[0], 0)))
         similarity_father = -tf.nn.tanh(tf.abs(tf.expand_dims(C_batch_img[0], 0) - fake_baby_father))
         similarity_mother = -tf.nn.tanh(tf.abs(tf.expand_dims(C_batch_img[1], 0) - fake_baby_mother))
         similarity = tf.concat([similarity_father, similarity_mother], 0)
         baby_part = run_model(from_baby_mod, similarity, True)
 
-        fake_baby_from_father = run_model(father_discrim, similarity_father, True)
-        fake_baby_from_mother = run_model(mother_discrim, similarity_mother, True)
+        fake_baby_from_father = run_model(father_discrim, fake_baby_father, True)
+        fake_baby_from_mother = run_model(mother_discrim, fake_baby_mother, True)
         real_baby_from_father = run_model(father_discrim, A_batch_img, True)
         real_baby_from_mother = run_model(mother_discrim, B_batch_img, True)
         fake_baby = run_model(baby_discrim, baby_part, True)
         real_baby = run_model(baby_discrim, C_batch_img, True)
 
-        g_father_Idloss = tf.reduce_mean(tf.abs(similarity_father - tf.expand_dims(C_batch_img[0], 0)))
-        g_mother_Idloss = tf.reduce_mean(tf.abs(similarity_mother - tf.expand_dims(C_batch_img[1], 0)))
+        ##################################################################################################################
+        # 이 부분을 고치면 될 것 같다 --> 이것도 아니다2)
+        g_father_Idloss = tf.reduce_mean(tf.abs(similarity_father - A_batch_img))
+        g_mother_Idloss = tf.reduce_mean(tf.abs(similarity_mother - B_batch_img))
         g_baby_Idloss = tf.reduce_mean(tf.abs(baby_part - C_batch_img))
+        ##################################################################################################################
 
         g_loss = tf.reduce_mean((tf.ones_like(fake_baby_from_father) - fake_baby_from_father)**2) \
                 + tf.reduce_mean((tf.ones_like(fake_baby_from_mother) - fake_baby_from_mother)**2) \
                 + tf.reduce_mean((tf.ones_like(fake_baby) - fake_baby)**2) \
-                + (g_baby_Idloss * 10.0) + (g_father_Idloss + g_mother_Idloss) * 5.0
+                + (g_baby_Idloss) + (g_father_Idloss + g_mother_Idloss) * 10.0
 
         d_loss = (tf.reduce_mean((tf.zeros_like(fake_baby_from_father) - fake_baby_from_father)**2) + tf.reduce_mean((tf.ones_like(real_baby_from_father) - real_baby_from_father)**2)) * 0.5 \
                 + (tf.reduce_mean((tf.zeros_like(fake_baby_from_mother) - fake_baby_from_mother)**2) + tf.reduce_mean((tf.ones_like(real_baby_from_mother) - real_baby_from_mother)**2)) * 0.5 \
